@@ -53,6 +53,7 @@ int main()
     
     Radio::Init(&rev);
 
+    Radio::radio.hw_reset();
     Radio::Standby();
     Radio::LoRaModemConfig(BW_KHZ, SPREADING_FACTOR, 1);
     Radio::SetChannel(CF_HZ);
