@@ -18,21 +18,37 @@ DigitalOut myled(LED1);
 //Serial pc(PA_11,PA_12);
 /**********************************************************************/
 
+/* Defines the two queues used, one for events and one for printing to the screen */
+EventQueue TimeQueue;
+
+/* Defines the timer */
+Timer t;
+time_t whattime;
+int64_t usTime1 = 0, usTime2 = 0, usDeltaTime = 0;
+
+//Updates the time at an interval defined by the read ticker
+void Update_time() {
+  // this runs in the normal priority thread
+    usTime2 = usTime1;
+    usTime1 = t.read_high_resolution_us();
+    usDeltaTime = usTime1 - usTime2;
+    whattime = time(NULL);
+}
+
+
 void txDoneCB()
 {
 }
 
 void rxDoneCB(uint8_t size, float rssi, float snr)
 {
+    printf("-----------------------------\r\n");
+    printf("\r\nCurrent RX Epoch Time: %u\r\n", (unsigned int)whattime);
     unsigned i;
-    printf("%.1fdBm  snr:%.1fdB\t", rssi, snr);
+    printf("RSSI: %.1fdBm  SNR: %.1fdB\r\n", rssi, snr);
 
-    myled.write(!myled.read()); // toggle LED
-
-    for (i = 0; i < size; i++) {
-        printf("%d ", Radio::radio.rx_buf[i]);
-    }
-    printf("\r\n");
+    int sent_time = (int)(Radio::radio.rx_buf[0] << 24 | Radio::radio.rx_buf[1] << 16 | Radio::radio.rx_buf[2] << 8 | Radio::radio.rx_buf[3]);
+    printf("Received time: %d\a\r\n", sent_time);
 }
 
 const RadioEvents_t rev = {
@@ -51,20 +67,38 @@ int main()
 {   
     printf("\r\nreset-rx\r\n");
     
-    Radio::Init(&rev);
+    /* resets and starts the timer */
+    t.reset();
+    t.start();
+    usTime1 = t.read_high_resolution_us();
 
-    //Radio::radio.hw_reset();
+    //Initialize receiver settings
+    Radio::Init(&rev);
     Radio::Standby();
     Radio::LoRaModemConfig(BW_KHZ, SPREADING_FACTOR, 1);
     Radio::SetChannel(CF_HZ);
-
                // preambleLen, fixLen, crcOn, invIQ
     Radio::LoRaPacketConfig(8, false, true, false);
 
+    //Tells the receiver to listen forever
     Radio::Rx(0);
     
+    // normal priority thread for other events
+    Thread eventThread(osPriorityNormal);
+    eventThread.start(callback(&TimeQueue, &EventQueue::dispatch_forever));
+
+    //call read_sensors 1 every second, automatically defering to the eventThread
+    Ticker ReadTicker;
+    ReadTicker.attach(TimeQueue.event(&Update_time), 3.0f);
+    //not using printticker for now
+    //PrintTicker.attach(printfQueue.event(&Print_Sensors), 3.0f);
+
+    //This services interrupts. No idea how it works, how often it should be called etc.
+    //but it works for now i guess
     for (;;) {     
         Radio::service();
     }
+
+    wait(osWaitForever);
 }
 
