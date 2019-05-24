@@ -47,8 +47,14 @@ void rxDoneCB(uint8_t size, float rssi, float snr)
     unsigned i;
     printf("RSSI: %.1fdBm  SNR: %.1fdB\r\n", rssi, snr);
 
+    //This is really wonky I know but i cant be bothered to write a function
     int sent_time = (int)(Radio::radio.rx_buf[0] << 24 | Radio::radio.rx_buf[1] << 16 | Radio::radio.rx_buf[2] << 8 | Radio::radio.rx_buf[3]);
+    int sent_temp1 = (int)(Radio::radio.rx_buf[4] << 24 | Radio::radio.rx_buf[5] << 16 | Radio::radio.rx_buf[6] << 8 | Radio::radio.rx_buf[7]);
+    float fl_temp1 = ((float)sent_temp1)/100;
+    int sent_accz = (int)(Radio::radio.rx_buf[8] << 24 | Radio::radio.rx_buf[9] << 16 | Radio::radio.rx_buf[10] << 8 | Radio::radio.rx_buf[11]);
     printf("Received time: %d\a\r\n", sent_time);
+    printf("Received temp: %.2f\r\n", fl_temp1);
+    printf("Received accz: %d\r\n", sent_accz);
 }
 
 const RadioEvents_t rev = {
