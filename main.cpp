@@ -15,7 +15,7 @@
 #endif
 
 DigitalOut myled(LED1);
-
+//Serial pc(PA_11,PA_12);
 /**********************************************************************/
 
 void txDoneCB()
@@ -30,7 +30,7 @@ void rxDoneCB(uint8_t size, float rssi, float snr)
     myled.write(!myled.read()); // toggle LED
 
     for (i = 0; i < size; i++) {
-        printf("%02x ", Radio::radio.rx_buf[i]);
+        printf("%d ", Radio::radio.rx_buf[i]);
     }
     printf("\r\n");
 }
@@ -53,7 +53,7 @@ int main()
     
     Radio::Init(&rev);
 
-    Radio::radio.hw_reset();
+    //Radio::radio.hw_reset();
     Radio::Standby();
     Radio::LoRaModemConfig(BW_KHZ, SPREADING_FACTOR, 1);
     Radio::SetChannel(CF_HZ);
