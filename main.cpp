@@ -4,6 +4,7 @@
     #define BW_KHZ              125
     #define SPREADING_FACTOR    7
     #define CF_HZ               915000000
+    #define TX_DBM              20
 #elif defined(SX126x_H)
     #define BW_KHZ              125
     #define SPREADING_FACTOR    7
@@ -15,11 +16,13 @@
 #endif
 
 DigitalOut myled(LED1);
-//Serial pc(PA_11,PA_12);
+Serial pc(PA_11,PA_12);
 /**********************************************************************/
+volatile bool txDone;
 
 /* Defines the two queues used, one for events and one for printing to the screen */
 EventQueue TimeQueue;
+EventQueue TransmitQueue;
 
 /* Defines the timer */
 Timer t;
@@ -38,13 +41,14 @@ void Update_time() {
 
 void txDoneCB()
 {
+    txDone = true;
+    printf("done sending\r\n");
 }
 
 void rxDoneCB(uint8_t size, float rssi, float snr)
 {
     printf("-----------------------------\r\n");
     printf("\r\nCurrent RX Epoch Time: %u\r\n", (unsigned int)whattime);
-    unsigned i;
     printf("RSSI: %.1fdBm  SNR: %.1fdB\r\n", rssi, snr);
 
     //This is really wonky I know but i cant be bothered to write a function
@@ -55,6 +59,21 @@ void rxDoneCB(uint8_t size, float rssi, float snr)
     printf("Received time: %d\a\r\n", sent_time);
     printf("Received temp: %.2f\r\n", fl_temp1);
     printf("Received accz: %d\r\n", sent_accz);
+}
+
+void Send_transmission() {
+    //Building the payload
+    Radio::radio.tx_buf[0] = 0xAA;
+    pc.printf("Sending Query\r\n");
+
+    txDone = false;
+    Radio::Send(1, 0, 0, 0);   /* begin transmission */
+
+    while (!txDone) {
+        Radio::service();
+    }
+    printf("done servicing\r\n\r\n");
+    Radio::Rx(0);
 }
 
 const RadioEvents_t rev = {
@@ -83,9 +102,9 @@ int main()
     Radio::Standby();
     Radio::LoRaModemConfig(BW_KHZ, SPREADING_FACTOR, 1);
     Radio::SetChannel(CF_HZ);
+    Radio::set_tx_dbm(TX_DBM);
                // preambleLen, fixLen, crcOn, invIQ
     Radio::LoRaPacketConfig(8, false, true, false);
-
     //Tells the receiver to listen forever
     Radio::Rx(0);
     
@@ -93,15 +112,20 @@ int main()
     Thread eventThread(osPriorityNormal);
     eventThread.start(callback(&TimeQueue, &EventQueue::dispatch_forever));
 
+    // low priority thread for calling Send_transmission()
+    Thread TransmitThread(osPriorityNormal);
+    TransmitThread.start(callback(&TransmitQueue, &EventQueue::dispatch_forever));
+
     //call read_sensors 1 every second, automatically defering to the eventThread
     Ticker ReadTicker;
+    Ticker TransmitTicker;
+
     ReadTicker.attach(TimeQueue.event(&Update_time), 3.0f);
-    //not using printticker for now
-    //PrintTicker.attach(printfQueue.event(&Print_Sensors), 3.0f);
+    TransmitTicker.attach(TransmitQueue.event(&Send_transmission), 6.0f);
 
     //This services interrupts. No idea how it works, how often it should be called etc.
     //but it works for now i guess
-    for (;;) {     
+    for (;;) {
         Radio::service();
     }
 
