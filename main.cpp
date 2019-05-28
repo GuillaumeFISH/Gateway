@@ -42,13 +42,13 @@ void Update_time() {
 void txDoneCB()
 {
     txDone = true;
-    printf("done sending\r\n");
+    printf("Query sent\r\n");
 }
 
 void rxDoneCB(uint8_t size, float rssi, float snr)
 {
-    printf("-----------------------------\r\n");
-    printf("\r\nCurrent RX Epoch Time: %u\r\n", (unsigned int)whattime);
+    printf("------RECEIVING PACKET------\r\n");
+    //printf("\r\nCurrent RX Epoch Time: %u\r\n", (unsigned int)whattime);
     printf("RSSI: %.1fdBm  SNR: %.1fdB\r\n", rssi, snr);
 
     //This is really wonky I know but i cant be bothered to write a function
@@ -59,6 +59,7 @@ void rxDoneCB(uint8_t size, float rssi, float snr)
     printf("Received time: %d\a\r\n", sent_time);
     printf("Received temp: %.2f\r\n", fl_temp1);
     printf("Received accz: %d\r\n", sent_accz);
+    printf("------PACKET  RECEIVED------\r\n\r\n");
 }
 
 void Send_transmission() {
@@ -68,11 +69,10 @@ void Send_transmission() {
 
     txDone = false;
     Radio::Send(1, 0, 0, 0);   /* begin transmission */
-
     while (!txDone) {
         Radio::service();
     }
-    printf("done servicing\r\n\r\n");
+    printf("Done servicing\r\n\r\n");
     Radio::Rx(0);
 }
 
@@ -105,8 +105,6 @@ int main()
     Radio::set_tx_dbm(TX_DBM);
                // preambleLen, fixLen, crcOn, invIQ
     Radio::LoRaPacketConfig(8, false, true, false);
-    //Tells the receiver to listen forever
-    Radio::Rx(0);
     
     // normal priority thread for other events
     Thread eventThread(osPriorityNormal);
@@ -121,10 +119,11 @@ int main()
     Ticker TransmitTicker;
 
     ReadTicker.attach(TimeQueue.event(&Update_time), 3.0f);
-    TransmitTicker.attach(TransmitQueue.event(&Send_transmission), 6.0f);
+    TransmitTicker.attach(TransmitQueue.event(&Send_transmission), 10.0f);
 
     //This services interrupts. No idea how it works, how often it should be called etc.
     //but it works for now i guess
+    Radio::Rx(0);
     for (;;) {
         Radio::service();
     }
