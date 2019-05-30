@@ -1,3 +1,10 @@
+/*
+What Gateway does as of May 29 2019
+1. Sends out a ping every 10 seconds
+2. After successfully sending the ping, mode is set to receive indefinetely
+3. Once it receives a transmission, prints out the message
+4. Mode is set to standby until sending a ping again
+*/
 #include "radio.h"
 
 #if defined(SX127x_H)
@@ -76,13 +83,15 @@ void Send_transmission() {
     Radio::Rx(0);
 }
 
+//Many of these (likely all) are interrupts. Associate to them the name of a function you want executed
+//when the interrupt is triggered. Not all of them are associated to a pin.
 const RadioEvents_t rev = {
     /* Dio0_top_half */     NULL,
     /* TxDone_topHalf */    NULL,
     /* TxDone_botHalf */    txDoneCB,
     /* TxTimeout  */        NULL,
     /* RxDone  */           rxDoneCB,
-    /* RxTimeout  */        NULL,
+    /* RxTimeout  */        NULL, 
     /* RxError  */          NULL,
     /* FhssChangeChannel  */NULL,
     /* CadDone  */          NULL
