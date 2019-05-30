@@ -58,14 +58,56 @@ void rxDoneCB(uint8_t size, float rssi, float snr)
     //printf("\r\nCurrent RX Epoch Time: %u\r\n", (unsigned int)whattime);
     printf("RSSI: %.1fdBm  SNR: %.1fdB\r\n", rssi, snr);
 
-    //This is really wonky I know but i cant be bothered to write a function
+    //This is really wonky
+    //Unpacking the transmission
     int sent_time = (int)(Radio::radio.rx_buf[0] << 24 | Radio::radio.rx_buf[1] << 16 | Radio::radio.rx_buf[2] << 8 | Radio::radio.rx_buf[3]);
-    int sent_temp1 = (int)(Radio::radio.rx_buf[4] << 24 | Radio::radio.rx_buf[5] << 16 | Radio::radio.rx_buf[6] << 8 | Radio::radio.rx_buf[7]);
+    uint16_t sent_temp1 = Radio::radio.rx_buf[4] << 8 | Radio::radio.rx_buf[5];
     float fl_temp1 = ((float)sent_temp1)/100;
-    int sent_accz = (int)(Radio::radio.rx_buf[8] << 24 | Radio::radio.rx_buf[9] << 16 | Radio::radio.rx_buf[10] << 8 | Radio::radio.rx_buf[11]);
-    printf("Received time: %d\a\r\n", sent_time);
+                               //first 8 bits                 next 8 bits                   Last 4 bits
+    unsigned int uint_latitude = Radio::radio.rx_buf[6] << 12 | Radio::radio.rx_buf[7] << 4 | Radio::radio.rx_buf[8] >> 4; 
+                                //First 4 bits                            next 8 bits                    next 8 bits                    Last 4 bits
+    unsigned int uint_longitude = (Radio::radio.rx_buf[8] & 0xFF) << 20 | Radio::radio.rx_buf[9] << 12 | Radio::radio.rx_buf[10] << 4 | Radio::radio.rx_buf[11] >> 4;
+                                //First 4 bits                            next 8 bits                     next 8 bits                    Last 4 bits
+    unsigned int uint_altitude = (Radio::radio.rx_buf[11] & 0xFF) << 20 | Radio::radio.rx_buf[12] << 12 | Radio::radio.rx_buf[13] << 4 | Radio::radio.rx_buf[14] >> 4;
+    unsigned int uint_latlong = Radio::radio.rx_buf[14] & 0xF;
+    unsigned int uint_deviceid = Radio::radio.rx_buf[15];
+
+    //Converting lat/long/alt to appropriate format
+    float fl_latitude = ((float)uint_latitude) / 100;
+    float fl_longitude = ((float)uint_longitude) / 100;
+    float fl_altitude = ((float)uint_altitude) / 100;
+
+    //Unwrapping latlong packet
+    char c_lat;
+    char c_lon;
+    switch(uint_latlong){
+        case 0:
+            c_lat = 'N';
+            c_lon = 'E';
+            break;
+        case 1:
+            c_lat = 'N';
+            c_lon = 'W';
+            break;
+        case 2:
+            c_lat = 'S';
+            c_lon = 'E';
+            break;
+        case 3: 
+            c_lat = 'S';
+            c_lon = 'W';
+            break;
+        //Error case
+        default:
+            c_lat = 'Z';
+            c_lon = 'Z';
+    }
+    printf("Device id: %d\r\n", uint_deviceid);
+    printf("Location: %5.2f%c, %5.2f%c\r\n", fl_latitude, c_lat, fl_longitude, c_lon);
+    printf("Altitude: %5.2f\r\n", fl_altitude);
+    printf("Received time: %d\r\n", sent_time);
     printf("Received temp: %.2f\r\n", fl_temp1);
-    printf("Received accz: %d\r\n", sent_accz);
+
     printf("------PACKET  RECEIVED------\r\n\r\n");
 }
 
