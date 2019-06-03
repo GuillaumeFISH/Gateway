@@ -141,7 +141,7 @@ const RadioEvents_t rev = {
 
 int main()
 {   
-    printf("\r\nreset-rx\r\n");
+    printf("\r\nReset Gateway...\r\n");
     
     /* resets and starts the timer */
     t.reset();
