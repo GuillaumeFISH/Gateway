@@ -109,6 +109,7 @@ void rxDoneCB(uint8_t size, float rssi, float snr)
     printf("Received temp: %.2f\r\n", fl_temp1);
 
     printf("------PACKET  RECEIVED------\r\n\r\n");
+    Radio::Rx(0);
 }
 
 void Send_transmission() {
