@@ -72,6 +72,7 @@ void rxDoneCB(uint8_t size, float rssi, float snr)
     unsigned int uint_latlong = Radio::radio.rx_buf[12] & 0xF;
     unsigned int uint_deviceid = Radio::radio.rx_buf[13];
 
+    unsigned int uint_receivedtime = Radio::radio.rx_buf[14] << 16 | Radio::radio.rx_buf[14] << 8 | (Radio::radio.rx_buf[14] & 0xFF);
     //Converting lat/long/alt to appropriate format
     float fl_latitude = ((float)uint_latitude) / 100;
     float fl_longitude = ((float)uint_longitude) / 100;
@@ -105,8 +106,8 @@ void rxDoneCB(uint8_t size, float rssi, float snr)
     printf("Device id: %d\r\n", uint_deviceid);
     printf("Location: %5.2f%c, %5.2f%c\r\n", fl_latitude, c_lat, fl_longitude, c_lon);
     printf("Altitude: %5.2f\r\n", fl_altitude);
-    printf("Received time: %d\r\n", sent_time);
-    //printf("Received temp: %.2f\r\n", fl_temp1);
+    printf("Epoch time: %d\r\n", sent_time);
+    printf("Received timestamp: %d\r\n", uint_receivedtime);
 
     printf("------PACKET  RECEIVED------\r\n\r\n");
     Radio::Rx(0);
@@ -114,7 +115,7 @@ void rxDoneCB(uint8_t size, float rssi, float snr)
 
 void Send_transmission() {
     //Building the payload
-    Radio::radio.tx_buf[0] = 0xAA;
+    Radio::radio.tx_buf[0] = 0xAB;
     pc.printf("Sending Query\r\n");
 
     txDone = false;
