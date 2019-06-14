@@ -7,6 +7,7 @@ What Gateway does as of May 29 2019
 */
 #include "radio.h"
 #include "UTM.h"
+#include "TDOA.h"
 
 #if defined(SX127x_H)
     #define BW_KHZ              125
@@ -24,6 +25,7 @@ What Gateway does as of May 29 2019
 #endif
 
 #define M_PI           3.141592  /* pi */
+#define RESPONSE_THRESH 3
 
 DigitalOut myled(LED1);
 Serial pc(PA_11,PA_12);
@@ -33,7 +35,7 @@ volatile bool txDone;
 //Keep tracks of # of received packets
 int received_packets;
 
-double positioning_data[10][4];
+double positioning_data[10][3];
 
 /* Defines the two queues used, one for events and one for printing to the screen */
 EventQueue TimeQueue;
@@ -59,19 +61,27 @@ double DM_to_DD(double DM){
 
 void TDOA(){
     //convert lat long in array to decimal degrees format
-    printf("Time: %lf, Lat: %lf, Long: %lf, Alt: %lf\r\n", positioning_data[0][0], positioning_data[0][1], positioning_data[0][2], positioning_data[0][3]);
+    //printf("Time: %lf, Lat: %lf, Long: %lf\r\n", positioning_data[0][0], positioning_data[0][1], positioning_data[0][2]);
     for(int i = 0; i < received_packets; i++){
-        printf("the heck\r\n");
         positioning_data[i][1] = DM_to_DD(positioning_data[i][1]);
         positioning_data[i][2] = DM_to_DD(positioning_data[i][2]);
     }
-    double *row;
-    printf("Time: %lf, Lat: %lf, Long: %lf, Alt: %lf\r\n", positioning_data[0][0], positioning_data[0][1], positioning_data[0][2], positioning_data[0][3]);
+
+    //printf("Time: %lf, Lat: %lf, Long: %lf\r\n", positioning_data[0][0], positioning_data[0][1], positioning_data[0][2]);
     for(int i = 0; i < received_packets; i++){
-        row = &positioning_data[i][1];
+        LatLonToUTMXY(positioning_data[i][1], positioning_data[i][2], 0, positioning_data[i][1], positioning_data[i][2]);
     }
-    printf("%lf\r\n", row[1]);
-    printf("Time: %lf, Lat: %lf, Long: %lf, Alt: %lf\r\n", positioning_data[0][0], positioning_data[0][1], positioning_data[0][2], positioning_data[0][3]);
+    //printf("Time: %lf, Lat: %lf, Long: %lf\r\n", positioning_data[0][0], positioning_data[0][1], positioning_data[0][2]);
+
+    //Sort matrix according to time of arrival (column 0)
+    sort2D(positioning_data, received_packets);
+    //Build H matrix (Shift coords of each node according to reference node)
+    double H[received_packets-1][2];
+    buildH(positioning_data, H, received_packets);
+
+    printf("Time: %lf, Lat: %lf, Long: %lf\r\n", positioning_data[0][0], positioning_data[0][1], positioning_data[0][2]);
+    printf("Time: %lf, Lat: %lf, Long: %lf\r\n", positioning_data[1][0], positioning_data[1][1], positioning_data[1][2]);
+    printf("Time: %lf, Lat: %lf, Long: %lf\r\n", positioning_data[2][0], positioning_data[2][1], positioning_data[2][2]);
 }
 
 //Updates the time at an interval defined by the read ticker
@@ -155,9 +165,9 @@ void rxDoneCB(uint8_t size, float rssi, float snr)
     positioning_data[received_packets][0] = sent_time + dbl_receivedtime/1000000;
     positioning_data[received_packets][1] = fl_latitude;
     positioning_data[received_packets][2] = fl_longitude;
-    positioning_data[received_packets][3] = fl_altitude;
     received_packets++;
-    if(received_packets == 1)
+    //Start analysis if enough responses have been received
+    if(received_packets == RESPONSE_THRESH)
         TDOA();
     Radio::Rx(0);
 }
@@ -209,6 +219,63 @@ int main()
                // preambleLen, fixLen, crcOn, invIQ
     Radio::LoRaPacketConfig(8, false, true, false);
     
+    ///*MATLAB port testing
+    //double array[4][3] = {{3,4,5},{1,2,1},{5,1,4},{4,5,8}};
+    //double array[5][3] = {{3,4,5},{1,2,1},{5,1,4},{4,5,8},{1.4,8,2}};
+    //double array[5][3] = {{0.00004, 317090.99, 5874020.42},{0.00003193333, 323242.50, 5859811.98},
+    //{0.00003986666, 339229.73, 5871615.81},{0.00003766666,338950,5867016},{0.00003186666,318484,5865669}};
+    double array[5][3] = {{0.00001647806,392968,5635967},{0.0000211146,389057,5629856},{0.00003699225,376895,5636518}
+    ,{0.00002124803,390609,5641925},{0.00002054754,383773,5640583}};
+    int rows = 5;
+    sort2D(array, rows);
+    printf("\r\nReceived data Matrix sorted\r\n");
+    printf("%lf %lf %lf\r\n", array[0][0],array[0][1],array[0][2]);
+    printf("%lf %lf %lf\r\n", array[1][0],array[1][1],array[1][2]);
+    printf("%lf %lf %lf\r\n", array[2][0],array[2][1],array[2][2]);
+    printf("%lf %lf %lf\r\n", array[3][0],array[3][1],array[3][2]);
+    printf("%lf %lf %lf\r\n", array[4][0],array[4][1],array[4][2]);
+
+    
+    double H[rows-1][2];
+    buildH(array, H, rows);
+    printf("\r\nH Matrix \r\n");
+    printf("%lf %lf \r\n", H[0][0], H[0][1]);
+    printf("%lf %lf \r\n", H[1][0], H[1][1]);
+    printf("%lf %lf \r\n", H[2][0], H[2][1]);
+    printf("%lf %lf \r\n", H[3][0], H[3][1]);
+
+    double C[rows-1];
+    buildC(array, C, rows);
+    printf("\r\nC Matrix \r\n");
+    printf("%lf \r\n", C[0]);
+    printf("%lf \r\n", C[1]);
+    printf("%lf \r\n", C[2]);
+    printf("%lf \r\n", C[3]);
+    
+
+    double D[rows-1];
+    buildD(H, D, C, rows-1);
+    printf("\r\nD Matrix \r\n");
+    printf("%lf \r\n", D[0]);
+    printf("%lf \r\n", D[1]);
+    printf("%lf \r\n", D[2]);
+    printf("%lf \r\n", D[3]);
+
+    double X[2][2];
+    buildX(H, C, D, X, rows-1);
+
+    double root;
+    root = findroots(X);
+    printf("Root: %lf\r\n", root);
+
+    double xm = root * X[0][0] + X[0][1];
+    double ym = root * X[1][0] + X[1][1];
+    double xsource = xm + array[0][1];
+    double ysource = ym + array[0][2];
+    printf("xsource: %lf, ysource: %lf\r\n", xsource, ysource);
+
+
+    /*Utm Conversion Testing
     double x;
     double y;
     double lon = -114.112369;
@@ -220,6 +287,7 @@ int main()
     zone = 11;
     UTMXYToLatLon (x, y, zone, false, lat, lon);
     printf("lat: %lf lon: %lf\r\n",lat, lon);
+    */
 
     // normal priority thread for other events
     Thread eventThread(osPriorityNormal);
