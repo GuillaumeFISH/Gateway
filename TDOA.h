@@ -16,3 +16,5 @@ void buildX(double H[][2], double C[], double D[], double X[][2], int rows);
 void inverse2x2(double array[][2]);
 
 double findroots(double X[][2]);
+
+double DM_to_DD(double DM);

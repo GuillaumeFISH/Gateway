@@ -1,10 +1,3 @@
-/*
-What Gateway does as of May 29 2019
-1. Sends out a ping every 10 seconds
-2. After successfully sending the ping, mode is set to receive indefinetely
-3. Once it receives a transmission, prints out the message
-4. Mode is set to standby until sending a ping again
-*/
 #include "radio.h"
 #include "UTM.h"
 #include "TDOA.h"
@@ -27,6 +20,7 @@ What Gateway does as of May 29 2019
 #define M_PI           3.141592  /* pi */
 #define RESPONSE_THRESH 3
 
+//Define serial and led pins
 DigitalOut myled(LED1);
 Serial pc(PA_11,PA_12);
 /**********************************************************************/
@@ -35,6 +29,7 @@ volatile bool txDone;
 //Keep tracks of # of received packets
 int received_packets;
 
+//Holds relevant positioning information received from node
 double positioning_data[10][3];
 
 /* Defines the two queues used, one for events and one for printing to the screen */
@@ -47,18 +42,6 @@ time_t whattime;
 int64_t usTime1 = 0, usTime2 = 0, usDeltaTime = 0;
 
 
-
-//Converts from decimal minutes format to decimal degrees
-double DM_to_DD(double DM){
-    double minutes, degrees;
-
-    DM /= 100;
-    minutes = std::modf(DM, &degrees);
-    minutes *= 100;
-
-    return (degrees + minutes/60);
-}
-
 void TDOA(){
     //convert lat long in array to decimal degrees format
     //printf("Time: %lf, Lat: %lf, Long: %lf\r\n", positioning_data[0][0], positioning_data[0][1], positioning_data[0][2]);
@@ -68,6 +51,7 @@ void TDOA(){
     }
 
     //printf("Time: %lf, Lat: %lf, Long: %lf\r\n", positioning_data[0][0], positioning_data[0][1], positioning_data[0][2]);
+    //Convert lat long in array to UTM format
     for(int i = 0; i < received_packets; i++){
         LatLonToUTMXY(positioning_data[i][1], positioning_data[i][2], 0, positioning_data[i][1], positioning_data[i][2]);
     }
@@ -75,13 +59,37 @@ void TDOA(){
 
     //Sort matrix according to time of arrival (column 0)
     sort2D(positioning_data, received_packets);
+
     //Build H matrix (Shift coords of each node according to reference node)
     double H[received_packets-1][2];
     buildH(positioning_data, H, received_packets);
 
-    printf("Time: %lf, Lat: %lf, Long: %lf\r\n", positioning_data[0][0], positioning_data[0][1], positioning_data[0][2]);
-    printf("Time: %lf, Lat: %lf, Long: %lf\r\n", positioning_data[1][0], positioning_data[1][1], positioning_data[1][2]);
-    printf("Time: %lf, Lat: %lf, Long: %lf\r\n", positioning_data[2][0], positioning_data[2][1], positioning_data[2][2]);
+    //printf("Time: %lf, Lat: %lf, Long: %lf\r\n", positioning_data[0][0], positioning_data[0][1], positioning_data[0][2]);
+    //printf("Time: %lf, Lat: %lf, Long: %lf\r\n", positioning_data[1][0], positioning_data[1][1], positioning_data[1][2]);
+    //printf("Time: %lf, Lat: %lf, Long: %lf\r\n", positioning_data[2][0], positioning_data[2][1], positioning_data[2][2]);
+
+    //Build C matrix
+    double C[received_packets-1];
+    buildC(positioning_data, C, received_packets);
+
+    //Build D matrix
+    double D[received_packets-1];
+    buildD(H, D, C, received_packets-1);
+
+    //Build X matrix
+    double X[2][2];
+    buildX(H, C, D, X, received_packets-1);
+
+    //Finds the positive root of the polynomial, which is r1
+    double root;
+    root = findroots(X);
+
+    //Solved for the position of the mobile station and print results
+    double xm = root * X[0][0] + X[0][1];
+    double ym = root * X[1][0] + X[1][1];
+    double xsource = xm + positioning_data[0][1];
+    double ysource = ym + positioning_data[0][2];
+    printf("xsource: %lf, ysource: %lf\r\n", xsource, ysource);
 }
 
 //Updates the time at an interval defined by the read ticker
@@ -110,16 +118,22 @@ void rxDoneCB(uint8_t size, float rssi, float snr)
     int sent_time = (int)(Radio::radio.rx_buf[0] << 24 | Radio::radio.rx_buf[1] << 16 | Radio::radio.rx_buf[2] << 8 | Radio::radio.rx_buf[3]);
     uint16_t sent_temp1 = Radio::radio.rx_buf[4] << 8 | Radio::radio.rx_buf[5];
    //float fl_temp1 = ((float)sent_temp1)/100;
+
                                //first 8 bits                 next 8 bits                   Last 4 bits
     unsigned int uint_latitude = Radio::radio.rx_buf[4] << 12 | Radio::radio.rx_buf[5] << 4 | Radio::radio.rx_buf[6] >> 4; 
+
                                 //First 4 bits                            next 8 bits                    next 8 bits                    Last 4 bits
     unsigned int uint_longitude = (Radio::radio.rx_buf[6] & 0xF) << 20 | Radio::radio.rx_buf[7] << 12 | Radio::radio.rx_buf[8] << 4 | Radio::radio.rx_buf[9] >> 4;
+    
                                 //First 4 bits                            next 8 bits                     next 8 bits                    Last 4 bits
     unsigned int uint_altitude = (Radio::radio.rx_buf[9] & 0xF) << 20 | Radio::radio.rx_buf[10] << 12 | Radio::radio.rx_buf[11] << 4 | Radio::radio.rx_buf[12] >> 4;
+   
     unsigned int uint_latlong = Radio::radio.rx_buf[12] & 0xF;
+   
     unsigned int uint_deviceid = Radio::radio.rx_buf[13];
 
     double dbl_receivedtime = Radio::radio.rx_buf[14] << 16 | Radio::radio.rx_buf[14] << 8 | (Radio::radio.rx_buf[14] & 0xFF);
+   
     //Converting lat/long/alt to appropriate format
     float fl_latitude = ((float)uint_latitude) / 100;
     float fl_longitude = ((float)uint_longitude) / 100;
@@ -162,13 +176,15 @@ void rxDoneCB(uint8_t size, float rssi, float snr)
 
     printf("------PACKET  RECEIVED------\r\n\r\n");
 
-    positioning_data[received_packets][0] = sent_time + dbl_receivedtime/1000000;
+    positioning_data[received_packets][0] = sent_time/100000000000; //+ dbl_receivedtime/1000000; commented out for testing
     positioning_data[received_packets][1] = fl_latitude;
     positioning_data[received_packets][2] = fl_longitude;
+
     received_packets++;
     //Start analysis if enough responses have been received
     if(received_packets == RESPONSE_THRESH)
         TDOA();
+        
     Radio::Rx(0);
 }
 
@@ -219,7 +235,7 @@ int main()
                // preambleLen, fixLen, crcOn, invIQ
     Radio::LoRaPacketConfig(8, false, true, false);
     
-    ///*MATLAB port testing
+    /*MATLAB port testing
     //double array[4][3] = {{3,4,5},{1,2,1},{5,1,4},{4,5,8}};
     //double array[5][3] = {{3,4,5},{1,2,1},{5,1,4},{4,5,8},{1.4,8,2}};
     //double array[5][3] = {{0.00004, 317090.99, 5874020.42},{0.00003193333, 323242.50, 5859811.98},
@@ -273,7 +289,7 @@ int main()
     double xsource = xm + array[0][1];
     double ysource = ym + array[0][2];
     printf("xsource: %lf, ysource: %lf\r\n", xsource, ysource);
-
+    */
 
     /*Utm Conversion Testing
     double x;

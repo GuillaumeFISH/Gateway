@@ -228,6 +228,16 @@ void buildX(double H[][2], double C[], double D[], double X[][2], int rows){
     printf("%lf %lf\r\n", X[1][0], X[1][1]);
 }
 
+// findroots
+// Constructs a polynomial in the form ax^2 + bx + c, where x is r1,
+// and solves for the positive root.
+// 
+// Inputs:
+//     X = N x 2 vector where xa, xb, ya, yb are held, these values
+//     are used to build the polynomial.
+// 
+// Returns:
+//     Positive root of polynomial
 double findroots(double X[][2]){
     double P[3];
     P[0] = powf(X[0][0],2) + powf(X[1][0],2) - 1;
@@ -247,3 +257,20 @@ double findroots(double X[][2]){
         return root2;
 }
 
+// DM_to_DD
+// Converts the input from decimal minutes format to decimal degrees
+// 
+// Inputs:
+//     DM = Geodetic lat/long in decimal minutes format ie. 30deg 30.18min
+// 
+// Returns:
+//     Decimal degree representation of DM, ie. 30.503 deg
+double DM_to_DD(double DM){
+    double minutes, degrees;
+
+    DM /= 100;
+    minutes = std::modf(DM, &degrees);
+    minutes *= 100;
+
+    return (degrees + minutes/60);
+}
