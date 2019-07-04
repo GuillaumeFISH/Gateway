@@ -1,6 +1,7 @@
 #include "radio.h"
 #include "UTM.h"
 #include "TDOA.h"
+#include "MBed_Adafruit_GPS.h"
 
 #if defined(SX127x_H)
     #define BW_KHZ              125
@@ -113,36 +114,22 @@ void rxDoneCB(uint8_t size, float rssi, float snr)
     //printf("\r\nCurrent RX Epoch Time: %u\r\n", (unsigned int)whattime);
     printf("RSSI: %.1fdBm  SNR: %.1fdB\r\n", rssi, snr);
 
-    //This is really wonky
     //Unpacking the transmission
     int sent_time = (int)(Radio::radio.rx_buf[0] << 24 | Radio::radio.rx_buf[1] << 16 | Radio::radio.rx_buf[2] << 8 | Radio::radio.rx_buf[3]);
-    uint16_t sent_temp1 = Radio::radio.rx_buf[4] << 8 | Radio::radio.rx_buf[5];
-   //float fl_temp1 = ((float)sent_temp1)/100;
+    unsigned int uint_latitude = (Radio::radio.rx_buf[4] << 24 | Radio::radio.rx_buf[5] << 16 | Radio::radio.rx_buf[6] << 8 | Radio::radio.rx_buf[7]);
+    unsigned int uint_longitude = (Radio::radio.rx_buf[8] << 24 | Radio::radio.rx_buf[9] << 16 | Radio::radio.rx_buf[10] << 8 | Radio::radio.rx_buf[11]);
+    unsigned int uint_deviceid = Radio::radio.rx_buf[12];
+    double dbl_receivedtime = Radio::radio.rx_buf[13] << 16 | Radio::radio.rx_buf[14] << 8 | (Radio::radio.rx_buf[15] & 0xFF);
+    int8_t int8_latlon = Radio::radio.rx_buf[16];
 
-                               //first 8 bits                 next 8 bits                   Last 4 bits
-    unsigned int uint_latitude = Radio::radio.rx_buf[4] << 12 | Radio::radio.rx_buf[5] << 4 | Radio::radio.rx_buf[6] >> 4; 
-
-                                //First 4 bits                            next 8 bits                    next 8 bits                    Last 4 bits
-    unsigned int uint_longitude = (Radio::radio.rx_buf[6] & 0xF) << 20 | Radio::radio.rx_buf[7] << 12 | Radio::radio.rx_buf[8] << 4 | Radio::radio.rx_buf[9] >> 4;
-    
-                                //First 4 bits                            next 8 bits                     next 8 bits                    Last 4 bits
-    unsigned int uint_altitude = (Radio::radio.rx_buf[9] & 0xF) << 20 | Radio::radio.rx_buf[10] << 12 | Radio::radio.rx_buf[11] << 4 | Radio::radio.rx_buf[12] >> 4;
-   
-    unsigned int uint_latlong = Radio::radio.rx_buf[12] & 0xF;
-   
-    unsigned int uint_deviceid = Radio::radio.rx_buf[13];
-
-    double dbl_receivedtime = Radio::radio.rx_buf[14] << 16 | Radio::radio.rx_buf[14] << 8 | (Radio::radio.rx_buf[14] & 0xFF);
-   
     //Converting lat/long/alt to appropriate format
     float fl_latitude = ((float)uint_latitude) / 100;
     float fl_longitude = ((float)uint_longitude) / 100;
-    float fl_altitude = ((float)uint_altitude) / 100;
 
     //Unwrapping latlong packet
     char c_lat;
     char c_lon;
-    switch(uint_latlong){
+    switch(int8_latlon){
         case 0:
             c_lat = 'N';
             c_lon = 'E';
@@ -170,25 +157,25 @@ void rxDoneCB(uint8_t size, float rssi, float snr)
     }
     printf("Device id: %d\r\n", uint_deviceid);
     printf("Location: %5.2f%c, %5.2f%c\r\n", fl_latitude, c_lat, fl_longitude, c_lon);
-    printf("Altitude: %5.2f\r\n", fl_altitude);
     printf("Epoch time: %d\r\n", sent_time);
     printf("Received timestamp: %5.0f\r\n", dbl_receivedtime);
 
     printf("------PACKET  RECEIVED------\r\n\r\n");
 
-    positioning_data[received_packets][0] = sent_time/100000000000; //+ dbl_receivedtime/1000000; commented out for testing
+    positioning_data[received_packets][0] = sent_time + dbl_receivedtime/1000000;
     positioning_data[received_packets][1] = fl_latitude;
     positioning_data[received_packets][2] = fl_longitude;
 
     received_packets++;
-    //Start analysis if enough responses have been received
-    if(received_packets == RESPONSE_THRESH)
-        TDOA();
         
     Radio::Rx(0);
 }
 
 void Send_transmission() {
+    //# of responses check is here since Send_transmission() is called periodically
+    //and thus gateway only executes TDOA after certain period and if it received enough responses.
+    if(received_packets >= RESPONSE_THRESH)
+        TDOA();
     received_packets = 0;
     //Building the payload
     Radio::radio.tx_buf[0] = 0xAB;
@@ -221,6 +208,19 @@ int main()
 {   
     printf("\r\nReset Gateway...\r\n");
     
+    myGPS.begin(9600);  //sets baud rate for GPS communication; note this may be changed via Adafruit_GPS::sendCommand(char *)
+                    //a list of GPS commands is available at http://www.adafruit.com/datasheets/PMTK_A08.pdf
+
+    myGPS.sendCommand(PMTK_SET_BAUD_57600);
+    wait(1);
+    myGPS.sendCommand(PMTK_AWAKE);
+    printf("Wake Up GPS...\r\n");
+
+    wait(1);
+    //these commands are defined in MBed_Adafruit_GPS.h; a link is provided there for command creation
+    myGPS.sendCommand(PMTK_SET_NMEA_OUTPUT_RMCGGA);
+    myGPS.sendCommand(PMTK_SET_NMEA_UPDATE_5HZ);
+    myGPS.sendCommand(PGCMD_NOANTENNA);
     /* resets and starts the timer */
     t.reset();
     t.start();
@@ -318,7 +318,7 @@ int main()
     Ticker TransmitTicker;
 
     ReadTicker.attach(TimeQueue.event(&Update_time), 3.0f);
-    TransmitTicker.attach(TransmitQueue.event(&Send_transmission), 20.0f);
+    TransmitTicker.attach(TransmitQueue.event(&Send_transmission), 10.0f);
 
     //This services interrupts. No idea how it works, how often it should be called etc.
     //but it works for now i guess

@@ -131,11 +131,11 @@ void buildX(double H[][2], double C[], double D[], double X[][2], int rows){
     for (i = 0; i < 2; i++) 
         for (j = 0; j < rows; j++) 
             Htranspose[i][j] = H[j][i]; 
-    
+    /*
     printf("\r\nHTranspose \r\n");
     printf("%lf %lf %lf %lf\r\n", Htranspose[0][0], Htranspose[0][1], Htranspose[0][2], Htranspose[0][3]);
     printf("%lf %lf %lf %lf\r\n", Htranspose[1][0], Htranspose[1][1], Htranspose[1][2], Htranspose[1][3]);
-
+    */
     //Htranspose * H
     int left_col = rows;
     int right_row = 2;
@@ -151,17 +151,20 @@ void buildX(double H[][2], double C[], double D[], double X[][2], int rows){
             }
         }
     }
+    /*
     printf("\r\nresult\r\n");
     printf("%lf %lf\r\n", result[0][0], result[0][1]);
     printf("%lf %lf\r\n", result[1][0], result[1][1]);
-
+    */
     
     //Inv(H^t*H)
     inverse2x2(result);
+    /*
     printf("\r\nInverse Result\r\n");
     printf("%lf %lf\r\n", result[0][0], result[0][1]);
     printf("%lf %lf\r\n", result[1][0], result[1][1]);
-    
+    */
+
     //Inv(H^t*H) * H^t
     double intermediate2[2][rows];
     //initialize with zeros
@@ -182,10 +185,12 @@ void buildX(double H[][2], double C[], double D[], double X[][2], int rows){
             }
         }
     }
+    /*
     printf("\r\nIntermediate2\r\n");
     printf("%lf %lf %lf %lf\r\n", intermediate2[0][0], intermediate2[0][1], intermediate2[0][2], intermediate2[0][3]);
     printf("%lf %lf %lf %lf\r\n", intermediate2[1][0], intermediate2[1][1], intermediate2[1][2], intermediate2[1][3]);
-    
+    */
+
     //intermediate2 * C
     double x1[2] = {0,0};
     int left_row = 2;
@@ -198,10 +203,12 @@ void buildX(double H[][2], double C[], double D[], double X[][2], int rows){
 
         }
     }
+    /*
     printf("\r\nx1\r\n");
     printf("%lf\r\n", x1[0]);
     printf("%lf\r\n", x1[1]);
-    
+    */
+
     //intermediate2 * D
     double x2[2] = {0,0};
     left_row = 2;
@@ -214,18 +221,22 @@ void buildX(double H[][2], double C[], double D[], double X[][2], int rows){
 
         }
     }
+    /*
     printf("\r\nx2\r\n");
     printf("%lf\r\n", x2[0]);
     printf("%lf\r\n", x2[1]);
+    */
 
     //Finish building X
     X[0][0] = x1[0];
     X[0][1] = x2[0];
     X[1][0] = x1[1];
     X[1][1] = x2[1];
+    /*
     printf("\r\nX\r\n");
     printf("%lf %lf\r\n", X[0][0], X[0][1]);
     printf("%lf %lf\r\n", X[1][0], X[1][1]);
+    */
 }
 
 // findroots
@@ -244,9 +255,11 @@ double findroots(double X[][2]){
     P[1] = X[0][0] * X[0][1] * 2 + X[1][0] * X[1][1] * 2;
     P[2] = powf(X[0][1], 2) + powf(X[1][1], 2);
 
+    /*
     printf("\r\nP\r\n");
     printf("%lf %lf %lf\r\n", P[0], P[1], P[2]);
-
+    */
+    
     double root1, root2, det;
     det = powf(P[1],2) - 4 * P[0] * P[2]; 
     root1 = ( -1 * P[1] + sqrtf(det) ) / ( 2 * P[0] );
