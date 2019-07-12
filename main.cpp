@@ -20,12 +20,15 @@
 
 #define M_PI           3.141592  /* pi */
 #define RESPONSE_THRESH 3
-
-//Define serial and led pins
-DigitalOut myled(LED1);
-Serial pc(PA_11,PA_12);
 /**********************************************************************/
+
+//Variable to help keep track if a transmission is over
 volatile bool txDone;
+
+//Configure GPS objects and NMEA data variable
+Serial * gps_Serial = new Serial(D1,D0); //serial object for use w/ GPS
+Adafruit_GPS myGPS(gps_Serial); //object of Adafruit's GPS class
+char c; //when read via Adafruit_GPS::read(), the class returns single character stored here
 
 //Keep tracks of # of received packets
 int received_packets;
@@ -33,16 +36,14 @@ int received_packets;
 //Holds relevant positioning information received from node
 double positioning_data[10][3];
 
-/* Defines the two queues used, one for events and one for printing to the screen */
-EventQueue TimeQueue;
+//Holds the node #s which received the query
+int node_ID[10];
+
+// Defines the EventQueues
 EventQueue TransmitQueue;
+EventQueue GPSQueue;
 
-/* Defines the timer */
-Timer t;
-time_t whattime;
-int64_t usTime1 = 0, usTime2 = 0, usDeltaTime = 0;
-
-
+//Algorithm to determine position with location information stored in positioning_data[10][3]
 void TDOA(){
     //convert lat long in array to decimal degrees format
     //printf("Time: %lf, Lat: %lf, Long: %lf\r\n", positioning_data[0][0], positioning_data[0][1], positioning_data[0][2]);
@@ -51,12 +52,10 @@ void TDOA(){
         positioning_data[i][2] = DM_to_DD(positioning_data[i][2]);
     }
 
-    //printf("Time: %lf, Lat: %lf, Long: %lf\r\n", positioning_data[0][0], positioning_data[0][1], positioning_data[0][2]);
     //Convert lat long in array to UTM format
     for(int i = 0; i < received_packets; i++){
         LatLonToUTMXY(positioning_data[i][1], positioning_data[i][2], 0, positioning_data[i][1], positioning_data[i][2]);
     }
-    //printf("Time: %lf, Lat: %lf, Long: %lf\r\n", positioning_data[0][0], positioning_data[0][1], positioning_data[0][2]);
 
     //Sort matrix according to time of arrival (column 0)
     sort2D(positioning_data, received_packets);
@@ -65,9 +64,11 @@ void TDOA(){
     double H[received_packets-1][2];
     buildH(positioning_data, H, received_packets);
 
-    //printf("Time: %lf, Lat: %lf, Long: %lf\r\n", positioning_data[0][0], positioning_data[0][1], positioning_data[0][2]);
-    //printf("Time: %lf, Lat: %lf, Long: %lf\r\n", positioning_data[1][0], positioning_data[1][1], positioning_data[1][2]);
-    //printf("Time: %lf, Lat: %lf, Long: %lf\r\n", positioning_data[2][0], positioning_data[2][1], positioning_data[2][2]);
+    /*
+    printf("Time: %lf, Lat: %5.6f, Long: %5.6f\r\n", positioning_data[0][0], positioning_data[0][1], positioning_data[0][2]);
+    printf("Time: %lf, Lat: %5.6f, Long: %5.6f\r\n", positioning_data[1][0], positioning_data[1][1], positioning_data[1][2]);
+    printf("Time: %lf, Lat: %5.6f, Long: %5.6f\r\n", positioning_data[2][0], positioning_data[2][1], positioning_data[2][2]);
+    */
 
     //Build C matrix
     double C[received_packets-1];
@@ -90,16 +91,35 @@ void TDOA(){
     double ym = root * X[1][0] + X[1][1];
     double xsource = xm + positioning_data[0][1];
     double ysource = ym + positioning_data[0][2];
-    printf("xsource: %lf, ysource: %lf\r\n", xsource, ysource);
-}
+    printf("xsource: %5.6f, ysource: %5.6f\r\n", xsource, ysource);
+    GPS_data();
 
-//Updates the time at an interval defined by the read ticker
-void Update_time() {
-  // this runs in the normal priority thread
-    usTime2 = usTime1;
-    usTime1 = t.read_high_resolution_us();
-    usDeltaTime = usTime1 - usTime2;
-    whattime = time(NULL);
+    /* Hardcode gps data for testing.
+    if (!myGPS.fix) {
+        myGPS.latitude = 5051.95; 
+        myGPS.longitude = -10635.49;
+        myGPS.lat = 'N';
+        myGPS.lon = 'W';
+    }
+    */
+
+    //TODO: LatLontoUTMXY requires lat and long to be signed appropriately according to heading,
+    //need to add similar code as found in rxdonecb to multiply lat/long by -1 when appropriate
+    double localLat = DM_to_DD(myGPS.latitude);
+    double localLon = DM_to_DD(myGPS.longitude);
+    LatLonToUTMXY (localLat, localLon, 0, localLat, localLon);
+    printf("localLat: %5.6f, localLon: %5.6f\r\n", localLat, localLon);
+    int latdiff = localLat - xsource;
+    int londiff = localLon - ysource;
+    int error = sqrtf(powf(latdiff, 2) + powf(londiff, 2));
+    printf("Error in reported distance: %dm\r\n", error);
+    printf("Number of nodes used in TDOA calc: %d\r\n", received_packets);
+    printf("Nodes used in TDOA: ");
+    //Print out node IDs' that received query
+    for( int i = 0; i < received_packets; i++){
+        printf("%d ", node_ID[i]);
+    }
+    printf("\r\n\r\n");
 }
 
 void txDoneCB()
@@ -111,11 +131,10 @@ void txDoneCB()
 void rxDoneCB(uint8_t size, float rssi, float snr)
 {
     printf("------RECEIVING PACKET------\r\n");
-    //printf("\r\nCurrent RX Epoch Time: %u\r\n", (unsigned int)whattime);
     printf("RSSI: %.1fdBm  SNR: %.1fdB\r\n", rssi, snr);
 
     //Unpacking the transmission
-    int sent_time = (int)(Radio::radio.rx_buf[0] << 24 | Radio::radio.rx_buf[1] << 16 | Radio::radio.rx_buf[2] << 8 | Radio::radio.rx_buf[3]);
+    float sent_time = (float)(Radio::radio.rx_buf[0] << 24 | Radio::radio.rx_buf[1] << 16 | Radio::radio.rx_buf[2] << 8 | Radio::radio.rx_buf[3]);
     unsigned int uint_latitude = (Radio::radio.rx_buf[4] << 24 | Radio::radio.rx_buf[5] << 16 | Radio::radio.rx_buf[6] << 8 | Radio::radio.rx_buf[7]);
     unsigned int uint_longitude = (Radio::radio.rx_buf[8] << 24 | Radio::radio.rx_buf[9] << 16 | Radio::radio.rx_buf[10] << 8 | Radio::radio.rx_buf[11]);
     unsigned int uint_deviceid = Radio::radio.rx_buf[12];
@@ -155,16 +174,20 @@ void rxDoneCB(uint8_t size, float rssi, float snr)
             c_lat = 'Z';
             c_lon = 'Z';
     }
+
     printf("Device id: %d\r\n", uint_deviceid);
-    printf("Location: %5.2f%c, %5.2f%c\r\n", fl_latitude, c_lat, fl_longitude, c_lon);
+    printf("Location: %5.6f%c, %5.6f%c\r\n", fl_latitude, c_lat, fl_longitude, c_lon);
     printf("Epoch time: %d\r\n", sent_time);
     printf("Received timestamp: %5.0f\r\n", dbl_receivedtime);
-
     printf("------PACKET  RECEIVED------\r\n\r\n");
 
+    //Build the received message's row vector
     positioning_data[received_packets][0] = sent_time + dbl_receivedtime/1000000;
     positioning_data[received_packets][1] = fl_latitude;
     positioning_data[received_packets][2] = fl_longitude;
+
+    //Log the node's ID
+    node_ID[received_packets] = uint_deviceid;
 
     received_packets++;
         
@@ -176,13 +199,15 @@ void Send_transmission() {
     //and thus gateway only executes TDOA after certain period and if it received enough responses.
     if(received_packets >= RESPONSE_THRESH)
         TDOA();
+
     received_packets = 0;
+
     //Building the payload
     Radio::radio.tx_buf[0] = 0xAB;
-    pc.printf("Sending Query\r\n");
+    printf("Sending Query\r\n");
 
     txDone = false;
-    Radio::Send(1, 0, 0, 0);   /* begin transmission */
+    Radio::Send(1, 0, 0, 0);
     while (!txDone) {
         Radio::service();
     }
@@ -190,8 +215,23 @@ void Send_transmission() {
     Radio::Rx(0);
 }
 
-//Many of these (likely all) are interrupts. Associate to them the name of a function you want executed
-//when the interrupt is triggered. Not all of them are associated to a pin.
+//Collects and parses GPS data
+void GPS_data() {
+    printf("Got to gps_data\r\n");
+    do{
+        c = myGPS.read();   //queries the GPS
+        //if (c) { pc.printf("%c", c); } //this line will echo the GPS data if not paused
+        //check if we recieved a new message from GPS, if so, attempt to parse it,
+        if (myGPS.newNMEAreceived() == true)
+        {
+            if (myGPS.parse(myGPS.lastNMEA()) == true)
+            {
+                break;
+            }
+        }
+    } while(myGPS.newNMEAreceived() == false);
+}
+
 const RadioEvents_t rev = {
     /* Dio0_top_half */     NULL,
     /* TxDone_topHalf */    NULL,
@@ -206,27 +246,17 @@ const RadioEvents_t rev = {
 
 int main()
 {   
-    printf("\r\nReset Gateway...\r\n");
-    
-    myGPS.begin(9600);  //sets baud rate for GPS communication; note this may be changed via Adafruit_GPS::sendCommand(char *)
-                    //a list of GPS commands is available at http://www.adafruit.com/datasheets/PMTK_A08.pdf
-
-    myGPS.sendCommand(PMTK_SET_BAUD_57600);
+    //GPS Settings
+    myGPS.sendCommand(PMTK_STANDBY);
     wait(1);
     myGPS.sendCommand(PMTK_AWAKE);
-    printf("Wake Up GPS...\r\n");
-
     wait(1);
-    //these commands are defined in MBed_Adafruit_GPS.h; a link is provided there for command creation
-    myGPS.sendCommand(PMTK_SET_NMEA_OUTPUT_RMCGGA);
-    myGPS.sendCommand(PMTK_SET_NMEA_UPDATE_5HZ);
+    myGPS.sendCommand(PMTK_SET_BAUD_57600);
+    myGPS.sendCommand(PMTK_SET_NMEA_OUTPUT_RMCONLY);
+    myGPS.sendCommand(PMTK_SET_NMEA_UPDATE_10HZ);
     myGPS.sendCommand(PGCMD_NOANTENNA);
-    /* resets and starts the timer */
-    t.reset();
-    t.start();
-    usTime1 = t.read_high_resolution_us();
 
-    //Initialize receiver settings
+    //Initialize tranceiver settings
     Radio::Init(&rev);
     Radio::Standby();
     Radio::LoRaModemConfig(BW_KHZ, SPREADING_FACTOR, 1);
@@ -235,93 +265,19 @@ int main()
                // preambleLen, fixLen, crcOn, invIQ
     Radio::LoRaPacketConfig(8, false, true, false);
     
-    /*MATLAB port testing
-    //double array[4][3] = {{3,4,5},{1,2,1},{5,1,4},{4,5,8}};
-    //double array[5][3] = {{3,4,5},{1,2,1},{5,1,4},{4,5,8},{1.4,8,2}};
-    //double array[5][3] = {{0.00004, 317090.99, 5874020.42},{0.00003193333, 323242.50, 5859811.98},
-    //{0.00003986666, 339229.73, 5871615.81},{0.00003766666,338950,5867016},{0.00003186666,318484,5865669}};
-    double array[5][3] = {{0.00001647806,392968,5635967},{0.0000211146,389057,5629856},{0.00003699225,376895,5636518}
-    ,{0.00002124803,390609,5641925},{0.00002054754,383773,5640583}};
-    int rows = 5;
-    sort2D(array, rows);
-    printf("\r\nReceived data Matrix sorted\r\n");
-    printf("%lf %lf %lf\r\n", array[0][0],array[0][1],array[0][2]);
-    printf("%lf %lf %lf\r\n", array[1][0],array[1][1],array[1][2]);
-    printf("%lf %lf %lf\r\n", array[2][0],array[2][1],array[2][2]);
-    printf("%lf %lf %lf\r\n", array[3][0],array[3][1],array[3][2]);
-    printf("%lf %lf %lf\r\n", array[4][0],array[4][1],array[4][2]);
+    //High priority thread for calls to GPS_data()
+    Thread gpsThread(osPriorityHigh);
+    gpsThread.start(callback(&GPSQueue, &EventQueue::dispatch_forever));
+    GPSQueue.event(&GPS_data);
 
-    
-    double H[rows-1][2];
-    buildH(array, H, rows);
-    printf("\r\nH Matrix \r\n");
-    printf("%lf %lf \r\n", H[0][0], H[0][1]);
-    printf("%lf %lf \r\n", H[1][0], H[1][1]);
-    printf("%lf %lf \r\n", H[2][0], H[2][1]);
-    printf("%lf %lf \r\n", H[3][0], H[3][1]);
-
-    double C[rows-1];
-    buildC(array, C, rows);
-    printf("\r\nC Matrix \r\n");
-    printf("%lf \r\n", C[0]);
-    printf("%lf \r\n", C[1]);
-    printf("%lf \r\n", C[2]);
-    printf("%lf \r\n", C[3]);
-    
-
-    double D[rows-1];
-    buildD(H, D, C, rows-1);
-    printf("\r\nD Matrix \r\n");
-    printf("%lf \r\n", D[0]);
-    printf("%lf \r\n", D[1]);
-    printf("%lf \r\n", D[2]);
-    printf("%lf \r\n", D[3]);
-
-    double X[2][2];
-    buildX(H, C, D, X, rows-1);
-
-    double root;
-    root = findroots(X);
-    printf("Root: %lf\r\n", root);
-
-    double xm = root * X[0][0] + X[0][1];
-    double ym = root * X[1][0] + X[1][1];
-    double xsource = xm + array[0][1];
-    double ysource = ym + array[0][2];
-    printf("xsource: %lf, ysource: %lf\r\n", xsource, ysource);
-    */
-
-    /*Utm Conversion Testing
-    double x;
-    double y;
-    double lon = -114.112369;
-    double lat = 51.098694;
-    int zone = 0;
-    zone = LatLonToUTMXY(lat, lon, zone, x, y);
-    printf("Zone: %d x: %lf y: %lf\r\n",zone, x, y);
-
-    zone = 11;
-    UTMXYToLatLon (x, y, zone, false, lat, lon);
-    printf("lat: %lf lon: %lf\r\n",lat, lon);
-    */
-
-    // normal priority thread for other events
-    Thread eventThread(osPriorityNormal);
-    eventThread.start(callback(&TimeQueue, &EventQueue::dispatch_forever));
-
-    // low priority thread for calling Send_transmission()
+    //Normal priority thread for calling Send_transmission()
     Thread TransmitThread(osPriorityNormal);
     TransmitThread.start(callback(&TransmitQueue, &EventQueue::dispatch_forever));
 
-    //call read_sensors 1 every second, automatically defering to the eventThread
-    Ticker ReadTicker;
+    //Ticker object and EventQueue for calling Send_transmission periodically
     Ticker TransmitTicker;
-
-    ReadTicker.attach(TimeQueue.event(&Update_time), 3.0f);
     TransmitTicker.attach(TransmitQueue.event(&Send_transmission), 10.0f);
 
-    //This services interrupts. No idea how it works, how often it should be called etc.
-    //but it works for now i guess
     Radio::Rx(0);
     for (;;) {
         Radio::service();
