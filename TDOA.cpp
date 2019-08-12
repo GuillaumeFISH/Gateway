@@ -51,9 +51,11 @@ void swap2rows(double array[][3] , int index, int j){
 // Returns:
 //     Nothing
 void buildH(double array[][3], double H[][2], int length){
+    //printf("H\r\n");
     for(int i = 0; i<length-1; i++){
         H[i][0] = array[i+1][1] - array[0][1]; //Xn - X0
         H[i][1] = array[i+1][2] - array[0][2]; //Yn - Y0
+        //printf("%lf %lf\r\n", H[i][0], H[i][1]);
     }
 }
 
@@ -71,6 +73,7 @@ void buildH(double array[][3], double H[][2], int length){
 void buildC(double array[][3], double C[], int length){
     for(int i = 0; i<length-1; i++){
         C[i] = -1 * (array[i+1][0] - array[0][0]) * V_LIGHT;
+        //printf("%lf\r\n", C[i]);
     }
 }
 
@@ -89,6 +92,7 @@ void buildC(double array[][3], double C[], int length){
 void buildD(double H[][2], double D[], double C[], int length){
     for(int i = 0; i<length; i++){
         D[i] = 0.5 * ( powf(H[i][0], 2) + powf(H[i][1], 2) - powf(C[i], 2) );
+        //printf("%lf\r\n", D[i]);
     }
 }
 
@@ -102,6 +106,7 @@ void buildD(double H[][2], double D[], double C[], int length){
 //     Nothing
 void inverse2x2(double array[][2]){
     double invdet = 1 / ( array[0][0] * array[1][1] - array[0][1] * array[1][0] );
+    //printf("invdet: %0.20f", invdet);
     double a = array[0][0];
     array[0][0] = array[1][1] * invdet;
     array[0][1] = array[0][1] * invdet * -1;
@@ -123,7 +128,7 @@ void inverse2x2(double array[][2]){
 // 
 // Returns:
 //     Nothing
-void buildX(double H[][2], double C[], double D[], double X[][2], int rows){
+double buildX(double H[][2], double C[], double D[], double X[][2], int rows){
     double Htranspose[2][rows];
 
     //Transpose of H
@@ -133,9 +138,10 @@ void buildX(double H[][2], double C[], double D[], double X[][2], int rows){
             Htranspose[i][j] = H[j][i]; 
     /*
     printf("\r\nHTranspose \r\n");
-    printf("%lf %lf %lf %lf\r\n", Htranspose[0][0], Htranspose[0][1], Htranspose[0][2], Htranspose[0][3]);
-    printf("%lf %lf %lf %lf\r\n", Htranspose[1][0], Htranspose[1][1], Htranspose[1][2], Htranspose[1][3]);
+    printf("%lf %lf %lf %lf %lf\r\n", Htranspose[0][0], Htranspose[0][1], Htranspose[0][2], Htranspose[0][3], Htranspose[0][4]);
+    printf("%lf %lf %lf %lf %lf\r\n", Htranspose[1][0], Htranspose[1][1], Htranspose[1][2], Htranspose[1][3], Htranspose[1][4]);
     */
+
     //Htranspose * H
     int left_col = rows;
     int right_row = 2;
@@ -161,8 +167,8 @@ void buildX(double H[][2], double C[], double D[], double X[][2], int rows){
     inverse2x2(result);
     /*
     printf("\r\nInverse Result\r\n");
-    printf("%lf %lf\r\n", result[0][0], result[0][1]);
-    printf("%lf %lf\r\n", result[1][0], result[1][1]);
+    printf("%0.15f %0.15f\r\n", result[0][0], result[0][1]);
+    printf("%0.15f %0.15f\r\n", result[1][0], result[1][1]);
     */
 
     //Inv(H^t*H) * H^t
@@ -203,11 +209,6 @@ void buildX(double H[][2], double C[], double D[], double X[][2], int rows){
 
         }
     }
-    /*
-    printf("\r\nx1\r\n");
-    printf("%lf\r\n", x1[0]);
-    printf("%lf\r\n", x1[1]);
-    */
 
     //intermediate2 * D
     double x2[2] = {0,0};
@@ -221,22 +222,28 @@ void buildX(double H[][2], double C[], double D[], double X[][2], int rows){
 
         }
     }
-    /*
-    printf("\r\nx2\r\n");
-    printf("%lf\r\n", x2[0]);
-    printf("%lf\r\n", x2[1]);
-    */
 
     //Finish building X
     X[0][0] = x1[0];
     X[0][1] = x2[0];
     X[1][0] = x1[1];
     X[1][1] = x2[1];
-    /*
-    printf("\r\nX\r\n");
-    printf("%lf %lf\r\n", X[0][0], X[0][1]);
-    printf("%lf %lf\r\n", X[1][0], X[1][1]);
-    */
+    
+    
+    //roots start here
+    float P[3];
+    P[0] = powf(X[0][0],2) + powf(X[1][0],2) - 1;
+    P[1] = X[0][0] * X[0][1] * 2 + X[1][0] * X[1][1] * 2;
+    P[2] = powf(X[0][1], 2) + powf(X[1][1], 2);
+    
+    double root1, root2, det;
+    det = powf(P[1],2) - 4 * P[0] * P[2]; 
+    root1 = ( -1 * P[1] + sqrtf(det) ) / ( 2 * P[0] );
+    root2 = ( -1 * P[1] - sqrtf(det) ) / ( 2 * P[0] );
+    if(root1 > 0)
+        return root1;
+    else
+        return root2;
 }
 
 // findroots
@@ -250,15 +257,19 @@ void buildX(double H[][2], double C[], double D[], double X[][2], int rows){
 // Returns:
 //     Positive root of polynomial
 double findroots(double X[][2]){
-    double P[3];
+    float P[3];
+    printf("\r\nX\r\n");
+    printf("%lf %lf\r\n", X[0][0], X[0][1]);
+    printf("%lf %lf\r\n", X[1][0], X[1][1]);
+    printf("%0.20f %0.20f\r\n", powf(X[0][0],2), powf(X[1][0],2));
     P[0] = powf(X[0][0],2) + powf(X[1][0],2) - 1;
     P[1] = X[0][0] * X[0][1] * 2 + X[1][0] * X[1][1] * 2;
     P[2] = powf(X[0][1], 2) + powf(X[1][1], 2);
-
-    /*
-    printf("\r\nP\r\n");
-    printf("%lf %lf %lf\r\n", P[0], P[1], P[2]);
-    */
+    
+    printf("%0.20f\r\n", P[0]);
+    printf("%0.20f\r\n", P[1]);
+    printf("%0.20f\r\n", P[2]);
+    
     
     double root1, root2, det;
     det = powf(P[1],2) - 4 * P[0] * P[2]; 
@@ -280,7 +291,6 @@ double findroots(double X[][2]){
 //     Decimal degree representation of DM, ie. 30.503 deg
 double DM_to_DD(double DM){
     double minutes, degrees;
-
     DM /= 100;
     minutes = std::modf(DM, &degrees);
     minutes *= 100;
